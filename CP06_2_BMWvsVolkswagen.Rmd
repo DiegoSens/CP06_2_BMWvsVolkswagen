@@ -1,0 +1,228 @@
+---
+title: "CP06_2 - BMW vs. Volkswagen"
+author: "Diego Senso González"
+date: "13/12/2020"
+output:
+  html_document:
+    theme: united
+    df_print: paged
+    toc: yes
+    toc_depth: 5
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+---
+
+# Objetivo
+
+El objetivo del presente informe es estudiar si existe cointegracíon entre las series temporales de BMW y Volkswagen.
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+library(tidyverse)
+library(broom)
+library(flextable)
+library(mgcv)
+library(reshape2)
+library(readr)
+library(ggplot2)
+library(skimr)
+library(imputeTS)
+require(forecast)
+require(xts)
+library(ggfortify)
+library(rmdformats)
+library(TSA)
+library(zoo)
+library(Hmisc)
+library(astsa)
+library(quantmod)
+library(forecast)
+library(fGarch)
+library(vars)
+library(devtools)
+library(PairTrading)
+library(urca)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, include=FALSE}
+archTest <- function(rtn,m=10){
+  y=(rtn-mean(rtn))^2
+  T=length(rtn)
+  atsq=y[(m+1):T]
+  x=matrix(0,(T-m),m)
+  for (i in 1:m){
+    x[,i]=y[(m+1-i):(T-i)]
+  }
+  md=lm(atsq~x)
+  summary(md)
+}
+
+sSymbol="BMW.DE"
+```
+
+```{r warning = FALSE, echo=FALSE, message=FALSE, include=FALSE}
+mData <- getSymbols("BMW.DE", from="2014-01-01", to="2020-11-20", auto.assign=FALSE) 
+xData=Ad(mData)
+```
+
+```{r warning = FALSE, echo=FALSE, include=FALSE}
+dRentCont=dailyReturn(xData,type='log',leading=FALSE)
+dRentCont=na.exclude(dRentCont)
+```
+
+```{r echo=FALSE, include=FALSE}
+plot.zoo(cbind(Ad(mData),dRentCont,dRentCont^2),main=paste(sSymbol," y  Rentabilidad"),xlab="años",ylab=c("Precio","rentabilidad","Volatilidad"))
+```
+
+```{r echo=FALSE, include=FALSE}
+#ACF & PACF 
+VolProxy=dRentCont^2
+
+#ACF y PACF
+tsdisplay(VolProxy) 
+```
+
+```{r echo=FALSE, include=FALSE}
+#Ljung-Box Test 
+Box.test(VolProxy,lag=10,  type="Lj")
+Box.test(VolProxy,lag=20,  type="Lj")
+Box.test(VolProxy,lag=40,  type="Lj")
+```
+
+```{r echo=FALSE, include=FALSE}
+#LM test
+archTest(dRentCont,20)
+```
+
+```{r echo=FALSE, warning = FALSE, include=FALSE}
+#Estimación del modelo ARCH
+m1=garchFit(~1+garch(1,0),data=dRentCont,trace=F)
+summary(m1)
+
+#Residuos
+resi=residuals(m1,standardize=T)
+resi=xts(resi,order.by=index(dRentCont))
+tsdisplay(resi^2)
+```
+
+```{r warning = FALSE, echo=FALSE, include=FALSE}
+# Estimación del modelo GARCH
+m2=garchFit(~1+garch(1,1),data=dRentCont,trace=F)
+summary(m2)
+
+#Errores
+resi=residuals(m2,standardize=T)
+resi=xts(resi,order.by=index(dRentCont))
+tsdisplay(resi^2)
+#plot(m2)
+```
+
+```{r warning=FALSE, echo=FALSE, include=FALSE}
+#Estimación del modelo
+m3=garchFit(~1+garch(1,1),data=dRentCont,trace=F,cond.dist="std")
+summary(m3)
+#plot(m3)
+
+#Volatilidad
+v1=volatility(m3) 
+v1=xts(v1,order.by=index(dRentCont)) 
+plot(v1)
+
+#Residuos
+resi=residuals(m3,standardize=T)
+resi=xts(resi,order.by=index(dRentCont))
+tsdisplay(resi^2)
+#plot(resi)
+```
+
+```{r echo=FALSE, include=FALSE}
+predict(m3)
+predict(m3, n.ahead = 10, plot=TRUE, crit_val=2)
+predict(m3,n.ahead=20,plot=TRUE,conf=.9,nx=100)
+```
+
+```{r warning = FALSE, echo=FALSE, include=FALSE}
+bmw <- getSymbols("BMW.DE", from="2014-01-01", to="2020-11-20", auto.assign=FALSE) 
+
+vol <- getSymbols("VOW3.DE", from="2014-01-01", to="2020-11-20", auto.assign=FALSE) 
+```
+
+```{r warning = FALSE, echo=FALSE, include=FALSE}
+rbmw=monthlyReturn(bmw[,6])
+rvol=monthlyReturn(vol[,6])
+```
+
+```{r, echo=FALSE, include=FALSE}
+vY=cbind(rbmw,rvol)
+colnames(vY)=c("BMW","VOL")
+vY=na.omit(vY)
+```
+
+```{r, echo=FALSE, warning=FALSE, include=FALSE}
+#Se selecciona el modelo
+model.var1=VAR(vY,type="none")
+summary(model.var1)
+
+#Se comprueba si hay causalidad entre ambas
+causality(model.var1)
+
+#Respuesta al impulso
+model.ri=irf(model.var1)
+model.ri
+plot(model.ri)
+
+#Prediccion
+predict(model.var1, n.ahead = 8, ci = 0.95)
+```
+
+# ¿Están cointegradas?
+
+Extraemos los datos de cotización de ambas empresas desde el 1 de enero de 2014 hasta el 12 de diciembre de 2020. Visualizamos las dos series por separado y realizamos el Dickey-Fuller Test para cada una:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+bmwData <- getSymbols("BMW.DE", from="2014-01-01", to="2020-12-12", auto.assign=FALSE) 
+bmwdata <- bmwData[,6]
+bmwdata <- na.omit(bmwdata)
+
+volData <- getSymbols("VOW3.DE", from="2014-01-01", to="2020-12-12", auto.assign=FALSE) 
+voldata <- volData[,6]
+voldata <- na.omit(voldata)
+
+plot(bmwdata, main = "BMW")
+plot(voldata, main = "Volkswagen")
+
+adf.test(bmwdata,k=0)
+adf.test(voldata,k=0)
+
+adf.test(bmwdata,k=6)
+adf.test(voldata,k=6)
+```
+
+Probando el test con diferentes valores de "k" (lag order o número de retardos), la interpretación es que se acepta la hipótesis nula, por lo que las series no son estacionarias. Completamos el análisis con el "Augmented Dickey-Fuller Test":
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(urca)
+test_1<-ur.df(bmwdata,type="none",selectlags="AIC",lags=10)
+summary(test_1)
+
+test_2<-ur.df(voldata,type="none",selectlags="AIC",lags=10)
+summary(test_2)
+```
+
+Observamos los resultados. De cara a obtener una visión definitiva sobre si las series están cointegradas, a continuación realizamos el "coint.test" de la librería "aTSA". Este test en R realiza el contraste Engle-Granger, el cual trabaja con la hipótesis nula de que las series no están correlacionadas.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(aTSA)
+bmwData <-bmwData[,6]
+volData <- volData[,6]
+
+bmwData <- as.vector(bmwData)
+volData <- as.vector(volData)
+coint.test(bmwData,volData, d = 0, nlag = NULL, output = TRUE)
+```
+
+A la vista de los resultados, cabe concluir que las series no están cointegradas. En todos los casos se acepta la hipótesis nula.
+
+## Conclusiones
+
+Cabe concluir que las series de BMW y Volkswagen no están cointegradas.
